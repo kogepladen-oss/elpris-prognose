@@ -12,7 +12,7 @@ from . import features as F
 
 log = logging.getLogger(__name__)
 
-MODEL_VERSION = "hgb-q-v1"
+MODEL_VERSION = "hgb-q-v2"  # v2: fra 5 dage før forudsiges afvigelsen fra sidste uges niveau
 SCALE = 20.0  # øre/kWh i asinh-transformationen; tåler negative priser
 
 
@@ -24,14 +24,28 @@ def inv(z):
     return SCALE * np.sinh(np.asarray(z, dtype=float))
 
 
+def reference(f: pd.DataFrame, cfg: dict) -> np.ndarray:
+    """Referenceniveau i z-rum. Med target="relative" lærer modellen afvigelsen fra sidste uges
+    gennemsnit i DK1, så den kan følge et prisniveau, den ikke har set før (træer kan ikke ekstrapolere)."""
+    m = cfg["model"]
+    use = f["h"].to_numpy() >= m.get("relative_from_horizon", 4)
+    if m.get("target") == "level":
+        use[:] = False
+    ref = f["dk1_7d"].to_numpy(dtype=float)
+    ref = np.where(np.isnan(ref), f["dk1_mean"].to_numpy(dtype=float), ref)
+    return np.where(use, fwd(np.nan_to_num(ref)), 0.0)
+
+
 @dataclass
 class HorizonModel:
     h: int
     cols: list[str]
     models: dict
+    cfg: dict
 
     def predict(self, X: pd.DataFrame) -> np.ndarray:
         z = np.column_stack([self.models[q].predict(X[self.cols]) for q in sorted(self.models)])
+        z = z + reference(X, self.cfg)[:, None]
         return np.sort(z, axis=1)  # undgå krydsende kvantiler (z-rum)
 
 
@@ -54,7 +68,7 @@ def fit(train: pd.DataFrame, h: int, cfg: dict) -> HorizonModel:
     # kvantil-træningen ca. 6 gange langsommere, så det er et bevidst valg.
     rep = np.rint(1 + 2 * w).astype(int)
     train = train.loc[train.index.repeat(rep)]
-    z = fwd(train["y"])
+    z = fwd(train["y"]) - reference(train, cfg)
     models = {}
     for q in m["quantiles"]:
         est = HistGradientBoostingRegressor(loss="quantile", quantile=q, max_iter=200,
@@ -63,7 +77,7 @@ def fit(train: pd.DataFrame, h: int, cfg: dict) -> HorizonModel:
                                             early_stopping=False, random_state=0)
         est.fit(train[cols], z)
         models[q] = est
-    return HorizonModel(h, cols, models)
+    return HorizonModel(h, cols, models, cfg)
 
 
 # ---------------------------------------------------------------- læring
@@ -85,11 +99,12 @@ def corrections(hist: pd.DataFrame, prices: pd.DataFrame, upto_date: pd.Timestam
     d, y = d[ok], y[ok]
     z, z10, z50, z90 = fwd(y), fwd(d["raw_p10"]), fwd(d["raw_p50"]), fwd(d["raw_p90"])
     recent = (d["target_date"] > upto_date - pd.Timedelta(days=m["bias_window_days"])).to_numpy()
-    bias = 0.5 * float(np.median((z - z50)[recent])) if recent.sum() >= 24 else 0.0
+    shrink = m.get("bias_shrink", 0.5)
+    bias = shrink * float(np.median((z - z50)[recent])) if recent.sum() >= 24 else 0.0
     zc = z50 + bias
     lo, hi = np.maximum(z50 - z10, 1e-6), np.maximum(z90 - z50, 1e-6)
     r = np.where(z >= zc, (z - zc) / hi, (zc - z) / lo)  # skaleret afstand; 1 = båndkant
-    factor = float(np.clip(np.quantile(r, m["target_coverage"]), 0.7, 2.5))
+    factor = float(np.clip(np.quantile(r, m["target_coverage"]), 0.7, m.get("max_band_factor", 4.0)))
     return bias, factor
 
 

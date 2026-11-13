@@ -47,6 +47,11 @@ backtest_weeks = 10
 bias_window_days = 21
 calibration_window_days = 30
 target_coverage = 0.8
+# Fra denne horisont (h = dage før - 1) lærer modellen afvigelsen fra sidste uges prisniveau
+# i stedet for selve prisen. Valgt ud fra walk-forward 13. nov. 2026 (se notes/LEARNINGS.md).
+relative_from_horizon = 4
+bias_shrink = 0.5
+max_band_factor = 4.0
 
 # Vejrpunkter: vind, solindstråling og temperatur hentes for hvert punkt.
 [[weather.points]]

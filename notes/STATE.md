@@ -4,10 +4,12 @@ Læs denne fil og `notes/LEARNINGS.md` i starten af hver session. Opdater dem, n
 
 ## Nu
 
-- Modelversion: `hgb-q-v1` (kvantil gradient boosting pr. prognosealder, asinh-transformeret pris).
-- Bygget efter projektinstruktionernes trin 1–6 i en første version. Testet på syntetiske data; endnu ikke kørt mod de rigtige API'er.
-- Første rigtige kørsel skal tjekkes: at Open-Meteo Previous Runs leverer `wind_speed_100m_previous_dayN`
-  (ellers falder koden tilbage til 10 m-vind × 1,35 og skriver det i loggen og i `meta.json`).
+- Modelversion: `hgb-q-v2` (kvantil gradient boosting pr. prognosealder; fra 5 dage før relativt til sidste uges niveau).
+- Kører dagligt på GitHub Actions i `kogepladen-oss/elpris-prognose` siden 13. nov. 2026.
+- Priser hentes fra Energy-Charts, fordi Energi Data Service giver 429 fra GitHub Actions (delt IP).
+  Første hentning tog ca. 10 min pga. Energy-Charts' kaldgrænse.
+- Open-Meteo Previous Runs leverer 100 m-vind. Hvert 2.–3. kald holdes tilbage i ca. 2 min; alle punkter hentes derfor i ét kald.
+- N1-tariffer fra DatahubPricelist kan også ramme 429; så bruges den gemte prisliste eller reservetabellen.
 
 ## Kendte forenklinger
 
