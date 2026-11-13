@@ -146,12 +146,15 @@ def fetch_prices_eds(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
 # ---------------------------------------------------------------- tariffer
 
 def fetch_grid_tariffs(gln: str, codes: list[str]) -> pd.DataFrame:
-    params = {"filter": json.dumps({"GLN_Number": [gln], "ChargeTypeCode": codes}), "limit": 0}
+    # ChargeType D03 = tarif pr. kWh. Samme kode bruges også til abonnementer (D01), som ikke må med.
+    params = {"filter": json.dumps({"GLN_Number": [gln], "ChargeTypeCode": codes, "ChargeType": ["D03"]}),
+              "limit": 0}
     recs = http_get(f"{EDS}/DatahubPricelist", params, max_wait=60).json().get("records", [])
     if not recs:
         raise SourceError("DatahubPricelist gav ingen tariffer for netselskabet")
     df = pd.DataFrame(recs)
-    keep = ["ChargeTypeCode", "Note", "ValidFrom", "ValidTo"] + [f"Price{i}" for i in range(1, 25)]
+    keep = ["ChargeType", "ChargeTypeCode", "Note", "ValidFrom", "ValidTo", "ResolutionDuration"] \
+        + [f"Price{i}" for i in range(1, 25)]
     return df[[c for c in keep if c in df.columns]]
 
 

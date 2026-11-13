@@ -24,6 +24,18 @@ def grid_fallback(idx: pd.DatetimeIndex, cfg: dict) -> pd.Series:
     return pd.Series(np.where(is_winter, winter[band], summer[band]), index=idx, name="grid")
 
 
+def only_kwh_tariffs(records: pd.DataFrame) -> pd.DataFrame:
+    """Kun tariffer pr. kWh: abonnementer (D01, månedlige) deler kode med tarifferne og skal ud."""
+    rec = records.copy()
+    if "ChargeType" in rec:
+        rec = rec[rec["ChargeType"].fillna("D03") == "D03"]
+    if "ResolutionDuration" in rec:
+        rec = rec[rec["ResolutionDuration"].fillna("PT1H").isin(["PT1H", "PT15M"])]
+    if "Note" in rec:
+        rec = rec[~rec["Note"].fillna("").str.contains(r"\babo", case=False, regex=True)]
+    return rec
+
+
 def grid_from_pricelist(idx: pd.DatetimeIndex, records: pd.DataFrame) -> pd.Series:
     """N1-tarif pr. time ud fra DatahubPricelist (DKK/kWh uden moms -> øre/kWh).
 
@@ -32,7 +44,7 @@ def grid_from_pricelist(idx: pd.DatetimeIndex, records: pd.DataFrame) -> pd.Seri
     """
     loc = to_local(idx).tz_localize(None)
     out = np.full(len(idx), np.nan)
-    rec = records.copy()
+    rec = only_kwh_tariffs(records)
     rec["ValidFrom"] = pd.to_datetime(rec["ValidFrom"])
     rec["ValidTo"] = pd.to_datetime(rec["ValidTo"]).fillna(pd.Timestamp("2100-01-01"))
     hours = loc.hour.to_numpy()
@@ -49,6 +61,7 @@ def grid_from_pricelist(idx: pd.DatetimeIndex, records: pd.DataFrame) -> pd.Seri
             total[m] += prices[hours[m]] * 100.0
             seen |= m
     out[seen] = total[seen]
+    out[out > 300] = np.nan  # sikkerhedsnet: over 3 kr/kWh er ikke en nettarif -> reservetabel
     return pd.Series(out, index=idx, name="grid")
 
 

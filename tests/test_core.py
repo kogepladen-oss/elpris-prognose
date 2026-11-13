@@ -154,3 +154,14 @@ def test_previous_runs_multi_location_parsing(monkeypatch):
     assert src == "wind_speed_100m"
     assert len(df) == 2 * 2 * 7 and set(df["point"]) == {p.name for p in pts}
     assert (df["wind_speed_100m"] == df["lead"]).all()
+
+
+def test_subscription_with_same_code_is_ignored():
+    w = World(CFG)
+    pl = w.fetch_grid_tariffs("x", ["CD"])
+    abo = {"ChargeTypeCode": "CD", "Note": "Net abo C forbrug", "ValidFrom": "2026-01-01",
+           "ValidTo": "2027-01-01", "Price1": 28.12, **{f"Price{i}": None for i in range(2, 25)}}
+    pl = pd.concat([pl, pd.DataFrame([abo])], ignore_index=True)
+    idx = pd.date_range("2026-11-13", periods=24, freq="h", tz="UTC")
+    g = tariffs.grid_from_pricelist(idx, pl)
+    assert g.max() < 100 and np.allclose(g.to_numpy(), tariffs.grid_fallback(idx, CFG).to_numpy())
