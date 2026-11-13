@@ -1,0 +1,55 @@
+name: Daglig elprisprognose
+
+on:
+  schedule:
+    # UTC. Første kørsel lige efter Nord Pool har frigivet morgendagens priser,
+    # de næste er genforsøg, hvis data manglede. En kørsel uden nye data stopper hurtigt.
+    - cron: "25 12 * * *"
+    - cron: "40 13 * * *"
+    - cron: "10 15 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Kør selvom dagens prognose findes"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-forecast
+  cancel-in-progress: false
+
+jobs:
+  forecast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Installér
+        run: pip install -r requirements.txt
+
+      - name: Test
+        run: python -m pytest -q tests
+
+      - name: Kør prognose
+        run: python -m elpris.run_daily ${{ inputs.force && '--force' || '' }}
+
+      - name: Gem resultat
+        run: |
+          git config user.name "elpris-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data docs reports
+          if git diff --cached --quiet; then
+            echo "Intet nyt at gemme."
+          else
+            git commit -m "Prognose $(TZ=Europe/Copenhagen date +%Y-%m-%d)"
+            git push
+          fi
