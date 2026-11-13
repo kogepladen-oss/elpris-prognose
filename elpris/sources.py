@@ -26,7 +26,7 @@ class SourceError(RuntimeError):
     pass
 
 
-def http_get(url: str, params: dict, tries: int = 4, timeout: int = 90) -> requests.Response:
+def http_get(url: str, params: dict, tries: int = 6, timeout: int = 90) -> requests.Response:
     last = None
     for i in range(tries):
         try:
@@ -35,9 +35,14 @@ def http_get(url: str, params: dict, tries: int = 4, timeout: int = 90) -> reque
                 return r
             if 400 <= r.status_code < 500 and r.status_code != 429:
                 raise SourceError(f"{url} gav {r.status_code}: {r.text[:300]}")
-            last = f"HTTP {r.status_code}"
-            if r.status_code == 429:  # Open-Meteo: minutgrænse ramt
-                time.sleep(65)
+            last = f"HTTP {r.status_code}: {r.text[:200]}"
+            if r.status_code == 429:  # grænse for antal kald ramt: vent det, serveren beder om
+                ra = r.headers.get("Retry-After")
+                wait = float(ra) if ra and ra.replace(".", "").isdigit() else 30 * (i + 1)
+                wait = min(max(wait, 5), 300)
+                log.warning("429 fra %s (Retry-After=%s, body=%s). Venter %.0f s.",
+                            url, ra, r.text[:200].replace("\n", " "), wait)
+                time.sleep(wait)
                 continue
         except requests.RequestException as e:  # netværksfejl: prøv igen
             last = str(e)
@@ -54,7 +59,9 @@ def _eds_records(dataset: str, start: datetime, end: datetime, flt: dict) -> lis
         "filter": json.dumps(flt),
         "limit": 0,
     }
-    return http_get(f"{EDS}/{dataset}", params).json().get("records", [])
+    recs = http_get(f"{EDS}/{dataset}", params).json().get("records", [])
+    time.sleep(2)  # skån Energi Data Service ved første store hentning
+    return recs
 
 
 def fetch_prices(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
