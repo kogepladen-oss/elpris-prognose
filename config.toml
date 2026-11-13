@@ -34,7 +34,7 @@ summer = [8.8, 12.8, 34.4, 12.8]   # april-september
 "2028" = 72.7
 
 [charging]
-energy_kwh = 30          # typisk behov pr. opladning
+energy_kwh = 50          # typisk behov pr. opladning
 charger_kw = 11          # ladeboksens effekt
 efficiency = 0.9         # tab i lader og batteri
 
