@@ -75,6 +75,8 @@ def metrics(res: pd.DataFrame, last_date: pd.Timestamp, window_days: int, cfg: d
 
 def weekly_report(res: pd.DataFrame, last_date: pd.Timestamp, metrics30: list[dict]) -> str:
     """Markdown til den ugentlige fejlanalyse. Claude læser den og foreslår én ændring ad gangen."""
+    if res is None or res.empty:
+        return f"# Ugerapport til og med {last_date:%Y-%m-%d}\n\nIngen afgjorte prognoser endnu.\n"
     r = res[pd.to_datetime(res["target_date"]) > last_date - pd.Timedelta(days=7)].copy()
     lines = [f"# Ugerapport til og med {last_date:%Y-%m-%d}", ""]
     if r.empty:

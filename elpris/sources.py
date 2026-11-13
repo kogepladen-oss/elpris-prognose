@@ -182,40 +182,42 @@ def fetch_weather_forecast(points: list[Point], days: int = 9) -> pd.DataFrame:
 
 
 def fetch_weather_previous_runs(points: list[Point], start: date, end: date) -> tuple[pd.DataFrame, str]:
-    """Historiske prognoser med fast horisont (1-7 dage). Returnerer langt format + vindkilde."""
+    """Historiske prognoser med fast horisont (1-7 dage). Returnerer langt format + vindkilde.
+
+    Alle punkter hentes i ét kald pr. 30 dage: Open-Meteo holder ofte et kald tilbage i ca. ét minut,
+    så færre kald er langt hurtigere end mange små.
+    """
     wind_src = "wind_speed_100m"
     out = []
     cur = start
     while cur <= end:
         nxt = min(cur + timedelta(days=30), end)
-        for p in points:  # ét punkt pr. kald holder svarene små
-            for attempt_var in (wind_src, "wind_speed_10m"):
-                vars_ = [attempt_var, "shortwave_radiation", "temperature_2m"]
-                cols = [f"{v}_previous_day{n}" for v in vars_ for n in range(1, MAX_LEAD + 1)]
-                params = {"latitude": p.lat, "longitude": p.lon, "hourly": ",".join(cols),
-                          "start_date": cur.isoformat(), "end_date": nxt.isoformat(),
-                          "timezone": "GMT", "wind_speed_unit": "ms"}
-                try:
-                    t0 = time.monotonic()
-                    js = http_get(OM_PREVIOUS, params, timeout=60, tries=4).json()
-                    log.info("Open-Meteo %s %s-%s: %.1f s", p.name, cur, nxt, time.monotonic() - t0)
-                    time.sleep(1.5)  # hold os under Open-Meteos gratisgrænse pr. minut
-                    break
-                except SourceError as e:
-                    if attempt_var == "wind_speed_10m":
-                        raise
-                    log.warning("100 m vind ikke tilgængelig i Previous Runs, bruger 10 m: %s", e)
-                    wind_src = "wind_speed_10m"
-            f = _om_frame(js, [p], cols)
-            for n in range(1, MAX_LEAD + 1):
-                part = pd.DataFrame({
-                    "time_utc": f["time_utc"], "point": p.name, "lead": n,
-                    "wind_speed_100m": f[f"{attempt_var}_previous_day{n}"].astype(float)
-                    * (1.35 if attempt_var == "wind_speed_10m" else 1.0),
-                    "shortwave_radiation": f[f"shortwave_radiation_previous_day{n}"].astype(float),
-                    "temperature_2m": f[f"temperature_2m_previous_day{n}"].astype(float),
-                })
-                out.append(part)
+        for attempt_var in (wind_src, "wind_speed_10m"):
+            vars_ = [attempt_var, "shortwave_radiation", "temperature_2m"]
+            cols = [f"{v}_previous_day{n}" for v in vars_ for n in range(1, MAX_LEAD + 1)]
+            params = {**_locs(points), "hourly": ",".join(cols),
+                      "start_date": cur.isoformat(), "end_date": nxt.isoformat(),
+                      "timezone": "GMT", "wind_speed_unit": "ms"}
+            try:
+                t0 = time.monotonic()
+                js = http_get(OM_PREVIOUS, params, timeout=120, tries=5).json()
+                log.info("Open-Meteo %d punkter %s til %s: %.1f s", len(points), cur, nxt, time.monotonic() - t0)
+                time.sleep(2)
+                break
+            except SourceError as e:
+                if attempt_var == "wind_speed_10m" or "400" not in str(e):
+                    raise
+                log.warning("100 m vind ikke tilgængelig i Previous Runs, bruger 10 m: %s", e)
+                wind_src = "wind_speed_10m"
+        f = _om_frame(js, points, cols)
+        for n in range(1, MAX_LEAD + 1):
+            out.append(pd.DataFrame({
+                "time_utc": f["time_utc"], "point": f["point"], "lead": n,
+                "wind_speed_100m": f[f"{attempt_var}_previous_day{n}"].astype(float)
+                * (1.35 if attempt_var == "wind_speed_10m" else 1.0),
+                "shortwave_radiation": f[f"shortwave_radiation_previous_day{n}"].astype(float),
+                "temperature_2m": f[f"temperature_2m_previous_day{n}"].astype(float),
+            }))
         cur = nxt + timedelta(days=1)
     df = pd.concat(out, ignore_index=True) if out else pd.DataFrame()
     return df, wind_src

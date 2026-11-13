@@ -127,3 +127,30 @@ def test_price_fallback_to_energy_charts(monkeypatch):
     # 4 kvarterer à 200 EUR/MWh i timen 00 UTC -> 200 * 7,46 / 10 øre/kWh
     v = df.loc[pd.Timestamp("2026-11-11T00:00", tz="UTC"), "DK1"]
     assert abs(v - 200 * sources.EUR_DKK / 10) < 1e-6
+
+
+def test_weekly_report_without_forecasts():
+    from elpris import evaluate
+    txt = evaluate.weekly_report(pd.DataFrame(), pd.Timestamp("2026-11-13"), [])
+    assert "Ingen afgjorte" in txt
+
+
+def test_previous_runs_multi_location_parsing(monkeypatch):
+    from elpris import sources
+
+    pts = CFG["weather"]["points"][:2]
+
+    class R:
+        def json(self):
+            h = {"time": ["2026-11-01T00:00", "2026-11-01T01:00"]}
+            for v in ("wind_speed_100m", "shortwave_radiation", "temperature_2m"):
+                for n in range(1, 8):
+                    h[f"{v}_previous_day{n}"] = [float(n), float(n)]
+            return [{"hourly": h}, {"hourly": h}]
+
+    monkeypatch.setattr(sources, "http_get", lambda *a, **k: R())
+    monkeypatch.setattr(sources.time, "sleep", lambda s: None)
+    df, src = sources.fetch_weather_previous_runs(pts, date(2026, 11, 1), date(2026, 11, 1))
+    assert src == "wind_speed_100m"
+    assert len(df) == 2 * 2 * 7 and set(df["point"]) == {p.name for p in pts}
+    assert (df["wind_speed_100m"] == df["lead"]).all()
