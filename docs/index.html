@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Elpris-prognose DK1</title>
+<script src="plotly.min.js"></script>
+<style>
+  :root {
+    color-scheme: light;
+    --surface: #fcfcfb; --surface-2: #f3f2ee; --border: #e2e0da;
+    --text: #0b0b0b; --text-2: #52514e; --muted: #8a8984;
+    --actual: #eb6834; --fc: #2a78d6; --band: rgba(42,120,214,0.16);
+    --now: #8a8984; --good: #008300; --warn: #b26b00; --bad: #c03a39;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --surface: #1a1a19; --surface-2: #242422; --border: #3a3936;
+      --text: #f0efec; --text-2: #c3c2b7; --muted: #8f8e88;
+      --actual: #d95926; --fc: #3987e5; --band: rgba(57,135,229,0.22);
+      --now: #8f8e88; --good: #3fae3f; --warn: #d9a032; --bad: #e66767;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--surface); color: var(--text);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 2px; }
+  h2 { font-size: 17px; margin: 32px 0 8px; }
+  .sub { color: var(--text-2); font-size: 13px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px 18px; margin: 16px 0 8px; align-items: end; }
+  label { display: flex; flex-direction: column; font-size: 12px; color: var(--text-2); gap: 3px; }
+  select, input { font: inherit; font-size: 14px; padding: 6px 8px; border: 1px solid var(--border);
+                  border-radius: 6px; background: var(--surface); color: var(--text); }
+  #chart { width: 100%; height: 460px; }
+  .warn { background: color-mix(in srgb, var(--warn) 14%, transparent); border-left: 3px solid var(--warn);
+          padding: 8px 12px; margin: 10px 0; border-radius: 4px; font-size: 14px; }
+  .card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .verdict { font-size: 19px; font-weight: 600; margin: 0 0 6px; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  th:first-child, td:first-child { text-align: left; }
+  caption { text-align: left; font-weight: 600; padding: 4px 0 6px; }
+  th { color: var(--text-2); font-weight: 600; font-size: 12px; }
+  .tag { font-size: 12px; padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
+  .tag.good { color: var(--good); border: 1px solid var(--good); }
+  .tag.bad { color: var(--bad); border: 1px solid var(--bad); }
+  details summary { cursor: pointer; color: var(--text-2); margin-top: 10px; }
+  .scroll { max-height: 420px; overflow: auto; }
+  .note { color: var(--text-2); font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title">Elpris-prognose DK1</h1>
+  <div class="sub" id="stamp">Indlæser…</div>
+  <div id="warnings"></div>
+
+  <div class="controls">
+    <label>Pris
+      <select id="level">
+        <option value="total">Alt inkl. (spot, N1, Energinet, afgift, tillæg, moms)</option>
+        <option value="spot_grid">Spot + N1-nettarif, inkl. moms</option>
+        <option value="spot">Kun spot, inkl. moms</option>
+      </select>
+    </label>
+    <label>Projiceret pris bagud = prognosen lavet
+      <select id="daysBefore">
+        <option value="2">2 dage før</option>
+        <option value="3" selected>3 dage før</option>
+        <option value="5">5 dage før</option>
+        <option value="7">7 dage før</option>
+      </select>
+    </label>
+  </div>
+  <div id="chart" role="img" aria-label="Elpris 7 dage tilbage og 7 dage frem: faktisk pris og prognose"></div>
+  <p class="note">Faktisk pris er Nord Pools day-ahead-pris. Prognosen fremad er den nyeste; bagud vises prognosen,
+    som den så ud på det valgte tidspunkt, så du kan se, hvor meget den ramte ved siden af. Båndet er P10–P90:
+    prisen burde ligge inden for det 8 ud af 10 gange.</p>
+
+  <h2>Hvornår skal bilen lades?</h2>
+  <div class="controls">
+    <label>Energi (kWh)<input id="kwh" type="number" min="1" max="100" step="1"></label>
+    <label>Ladeeffekt (kW)<input id="kw" type="number" min="1" max="22" step="0.1"></label>
+    <label>Skal være færdig<input id="deadline" type="datetime-local"></label>
+  </div>
+  <div class="card" id="plan"><p class="verdict">…</p></div>
+
+  <h2>Hvor godt rammer prognosen?</h2>
+  <p class="note" id="metricsNote">Fejl på den rene spotpris uden moms, øre/kWh. "Naiv" er prisen samme time ugen før. Ekstra ladeudgift er, hvad en ladning på dagen koster mere end i dagens billigste vindue, når vinduet vælges ud fra prognosen.</p>
+  <div class="grid2">
+    <div><table id="m7"></table></div>
+    <div><table id="m30"></table></div>
+  </div>
+
+  <details>
+    <summary>Vis timepriser som tabel</summary>
+    <div class="scroll"><table id="hourly"></table></div>
+  </details>
+</main>
+
+<script>
+const fmtT = new Intl.DateTimeFormat("da-DK", {timeZone: "Europe/Copenhagen", weekday: "short", day: "numeric",
+  month: "short", hour: "2-digit", minute: "2-digit"});
+const fmtH = new Intl.DateTimeFormat("da-DK", {timeZone: "Europe/Copenhagen", weekday: "short", hour: "2-digit", minute: "2-digit"});
+Plotly.register({moduleType: "locale", name: "da", dictionary: {}, format: {
+  days: ["søndag", "mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag"],
+  shortDays: ["søn", "man", "tir", "ons", "tor", "fre", "lør"],
+  months: ["januar", "februar", "marts", "april", "maj", "juni", "juli", "august", "september", "oktober", "november", "december"],
+  shortMonths: ["jan", "feb", "mar", "apr", "maj", "jun", "jul", "aug", "sep", "okt", "nov", "dec"],
+  decimal: ",", thousands: ".", date: "%d.%m.%Y"}});
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+let D = null;
+
+function levelAdder(i, level) {
+  if (level === "spot") return 0;
+  if (level === "spot_grid") return D.grid[i] ?? 0;
+  if (level === "spot_addon") return D.addon[i] ?? 0;
+  return (D.grid[i] ?? 0) + (D.energinet[i] ?? 0) + (D.elafgift[i] ?? 0) + (D.addon[i] ?? 0);
+}
+const toLevel = (v, i, level) => v == null ? null : (v + levelAdder(i, level)) * (1 + D.vat);
+
+function series(level, db) {
+  const n = D.t.length, now = Date.now();
+  const actual = [], fc = [], lo = [], hi = [], kind = [];
+  const past = D.past?.[db];
+  for (let i = 0; i < n; i++) {
+    actual.push(toLevel(D.actual[i], i, level));
+    let p = null;
+    if (D.actual[i] != null && past && past.p50[i] != null) {
+      p = [past.p10[i], past.p50[i], past.p90[i]]; kind.push(past.kind[i]);
+    } else if (D.actual[i] == null && D.live && D.live.p50[i] != null) {
+      p = [D.live.p10[i], D.live.p50[i], D.live.p90[i]]; kind.push("live");
+    } else kind.push(null);
+    fc.push(p ? toLevel(p[1], i, level) : null);
+    lo.push(p ? toLevel(p[0], i, level) : null);
+    hi.push(p ? toLevel(p[2], i, level) : null);
+  }
+  return {actual, fc, lo, hi, kind};
+}
+
+function draw() {
+  const level = document.getElementById("level").value;
+  const db = document.getElementById("daysBefore").value;
+  const s = series(level, db);
+  const x = D.t.map(t => new Date(t));
+  const nowX = new Date(D.generated_at);
+  const txt = css("--text-2"), grid = css("--border");
+  const traces = [
+    {x, y: s.hi, type: "scatter", mode: "lines", line: {width: 0}, hoverinfo: "skip", showlegend: false, connectgaps: false},
+    {x, y: s.lo, type: "scatter", mode: "lines", line: {width: 0}, fill: "tonexty", fillcolor: css("--band"),
+     name: "Usikkerhed P10–P90", hoverinfo: "skip", connectgaps: false},
+    {x, y: s.fc, type: "scatter", mode: "lines", name: "Prognose", line: {color: css("--fc"), width: 2, dash: "dash"},
+     customdata: s.lo.map((l, i) => [l, s.hi[i], s.kind[i] === "backtest" ? " (backtest)" : ""]),
+     hovertemplate: "Prognose %{y:.0f} øre%{customdata[2]}<br>P10–P90: %{customdata[0]:.0f}–%{customdata[1]:.0f}<extra></extra>"},
+    {x, y: s.actual, type: "scatter", mode: "lines", name: "Faktisk pris", line: {color: css("--actual"), width: 2},
+     hovertemplate: "Faktisk %{y:.0f} øre<extra></extra>"},
+  ];
+  const layout = {
+    margin: {l: 48, r: 12, t: 12, b: 40}, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
+    font: {family: "system-ui, sans-serif", color: txt, size: 12}, hovermode: "x unified",
+    legend: {orientation: "h", y: -0.14, x: 0},
+    xaxis: {type: "date", gridcolor: grid, linecolor: grid, tickformat: "%a %d/%m", hoverformat: "%a %d. %b kl. %H"},
+    yaxis: {title: {text: "øre/kWh", font: {size: 12}}, gridcolor: grid, zerolinecolor: grid, rangemode: "tozero"},
+    shapes: [{type: "line", x0: nowX, x1: nowX, yref: "paper", y0: 0, y1: 1,
+              line: {color: css("--now"), width: 1.5, dash: "dot"}}],
+    annotations: [{x: nowX, yref: "paper", y: 1, text: "nu", showarrow: false, yanchor: "bottom",
+                   font: {color: css("--now"), size: 11}}],
+  };
+  Plotly.react("chart", traces, layout, {displayModeBar: false, responsive: true, locale: "da"});
+  drawHourly(s);
+}
+
+function drawHourly(s) {
+  const rows = ["<tr><th>Time</th><th>Faktisk</th><th>Prognose</th><th>P10</th><th>P90</th></tr>"];
+  const f = v => v == null ? "–" : v.toFixed(0);
+  D.t.forEach((t, i) => {
+    if (s.actual[i] == null && s.fc[i] == null) return;
+    rows.push(`<tr><td>${fmtT.format(new Date(t))}</td><td>${f(s.actual[i])}</td><td>${f(s.fc[i])}</td><td>${f(s.lo[i])}</td><td>${f(s.hi[i])}</td></tr>`);
+  });
+  document.getElementById("hourly").innerHTML = rows.join("");
+}
+
+// ---------- ladeplan
+function plan() {
+  const kwh = +document.getElementById("kwh").value, kw = +document.getElementById("kw").value;
+  const dl = new Date(document.getElementById("deadline").value);
+  const eff = D.charging.efficiency || 0.9;
+  const n = Math.max(1, Math.ceil(kwh / eff / kw));
+  const gridKwh = kwh / eff;
+  const level = D.pays_grid ? "total" : "spot_addon";
+  const start = Math.ceil(Date.now() / 3.6e6) * 3.6e6;
+  const hrs = [];
+  D.t.forEach((t, i) => {
+    const ms = Date.parse(t);
+    if (ms < start || ms + 3.6e6 > dl.getTime()) return;
+    const known = D.actual[i] != null;
+    const mid = known ? D.actual[i] : D.live?.p50[i];
+    if (mid == null) return;
+    hrs.push({ms, known, p50: toLevel(mid, i, level),
+              p90: toLevel(known ? D.actual[i] : D.live.p90[i], i, level),
+              p10: toLevel(known ? D.actual[i] : D.live.p10[i], i, level)});
+  });
+  const el = document.getElementById("plan");
+  if (hrs.length < n) { el.innerHTML = `<p class="verdict">For kort tid til at lade ${kwh} kWh.</p>`; return; }
+  function best(list) {
+    let b = null;
+    for (let i = 0; i + n <= list.length; i++) {
+      const w = list.slice(i, i + n);
+      if (w.some((h, j) => j && h.ms - w[j - 1].ms !== 3.6e6)) continue;
+      const avg = k => w.reduce((a, h) => a + h[k], 0) / n;
+      const c = {start: w[0].ms, end: w[n - 1].ms + 3.6e6, p50: avg("p50"), p90: avg("p90"), p10: avg("p10"),
+                 known: w.every(h => h.known)};
+      if (!b || c.p50 < b.p50) b = c;
+    }
+    return b;
+  }
+  const all = best(hrs), known = best(hrs.filter(h => h.known));
+  const kr = v => (v * gridKwh / 100).toFixed(0);
+  const win = b => `${fmtH.format(new Date(b.start))}–${fmtH.format(new Date(b.end)).split(" ").pop()}`;
+  let verdict, detail;
+  if (!known) {
+    verdict = `Bedste bud: ${win(all)}`;
+    detail = `Ingen kendte priser i perioden. Forventet ca. ${kr(all.p50)} kr (80 % interval ${kr(all.p10)}–${kr(all.p90)} kr).`;
+  } else if (all.known || all.p50 > known.p50 - 2) {
+    verdict = `Lad ${win(known)}`;
+    detail = `Prisen er kendt: ca. ${kr(known.p50)} kr for ${kwh} kWh. Det kan ikke forventes at blive billigere senere.`;
+  } else if (all.p90 < known.p50) {
+    verdict = `Vent: ${win(all)} ser billigere ud`;
+    detail = `Forventet ${kr(all.p50)} kr mod ${kr(known.p50)} kr i det bedste kendte vindue. Selv i et dårligt udfald (P90) er det billigere.`;
+  } else {
+    verdict = `Vent sandsynligvis: ${win(all)}`;
+    detail = `Forventet ${kr(all.p50)} kr mod ${kr(known.p50)} kr nu (${win(known)}), men i et dårligt udfald op til ${kr(all.p90)} kr.`;
+  }
+  const basis = D.pays_grid ? "alle afgifter og tariffer" : "spot + tillæg (du betaler ikke nettarif og afgifter)";
+  el.innerHTML = `<p class="verdict">${verdict}</p><div>${detail}</div>
+    <div class="note">${n} timer à ${kw} kW. Beregnet med ${basis}, inkl. moms.</div>`;
+}
+
+// ---------- fejltabeller
+function metricsTable(id, rows, label) {
+  const el = document.getElementById(id);
+  if (!rows || !rows.length) { el.innerHTML = `<tr><td>${label}: ingen afgjorte prognoser endnu</td></tr>`; return; }
+  const f = (v, d = 1) => v == null ? "–" : v.toFixed(d);
+  const h = `<caption>${label}</caption><tr><th>Lavet dage før</th><th>Fejl (MAE)</th><th>Naiv</th><th>P10–P90 ramt</th><th>Ekstra ladeudgift<br>model / naiv</th></tr>`;
+  el.innerHTML = h + rows.map(r => {
+    const beats = r.mae_naive != null ? (r.mae < r.mae_naive
+      ? '<span class="tag good">slår naiv</span>' : '<span class="tag bad">slår ikke naiv</span>') : "";
+    const src = r.live_share < 0.5 ? " <span class='note'>(backtest)</span>" : "";
+    return `<tr><td>${r.days_before}${src}</td><td>${f(r.mae)} ${beats}</td><td>${f(r.mae_naive)}</td>
+      <td>${(r.coverage * 100).toFixed(0)} %</td><td>${r.regret_kr == null ? "–" : f(r.regret_kr, 2) + " / " + f(r.regret_naive_kr, 2) + " kr"}</td></tr>`;
+  }).join("");
+}
+
+async function init() {
+  try {
+    D = await (await fetch("forecast.json", {cache: "no-store"})).json();
+  } catch (e) {
+    document.getElementById("stamp").textContent = "Kunne ikke indlæse forecast.json."; return;
+  }
+  document.getElementById("title").textContent = D.title;
+  document.getElementById("stamp").textContent =
+    `Opdateret ${fmtT.format(new Date(D.generated_at))} · priser kendt til og med ${D.anchor_date} · model ${D.model_version}`;
+  const warns = [...(D.warnings || [])];
+  if (!D.live) warns.push("Der er ingen ny prognose i dag. Grafen viser kun kendte priser.");
+  document.getElementById("warnings").innerHTML = warns.map(w => `<div class="warn">${w}</div>`).join("");
+  const c = D.charging;
+  document.getElementById("kwh").value = c.energy_kwh;
+  document.getElementById("kw").value = c.charger_kw;
+  const dl = new Date(Date.now() + 2 * 864e5);
+  dl.setHours(7, 0, 0, 0);
+  const pad = v => String(v).padStart(2, "0");
+  document.getElementById("deadline").value =
+    `${dl.getFullYear()}-${pad(dl.getMonth() + 1)}-${pad(dl.getDate())}T${pad(dl.getHours())}:00`;
+  ["level", "daysBefore"].forEach(id => document.getElementById(id).addEventListener("change", draw));
+  ["kwh", "kw", "deadline"].forEach(id => document.getElementById(id).addEventListener("input", plan));
+  draw(); plan();
+  metricsTable("m7", D.metrics7, "Seneste 7 dage");
+  metricsTable("m30", D.metrics30, "Seneste 30 dage");
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", draw);
+}
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,83 @@
+# Konfiguration for elpris-prognosen. Alle priser er UDEN moms, medmindre andet står.
+
+[site]
+price_area = "DK1"
+timezone = "Europe/Copenhagen"
+title = "Elpris-prognose DK1"
+
+[pricing]
+vat_rate = 0.25
+# Elhandlerens spottillæg i øre/kWh uden moms. Ret til din aftale.
+spot_addon_ore_per_kwh = 0.0
+# Falsk = du betaler kun spot + tillæg (fx hvis udlejer betaler nettarif og afgifter).
+# Grafen viser stadig alle niveauer; ladeplanen bruger så spot + tillæg.
+pays_grid_tariffs_and_tax = true
+
+# N1 hentes dagligt fra DatahubPricelist. Tabellen nedenfor bruges kun, hvis hentningen fejler.
+grid_gln = "5790001089030"
+grid_charge_codes = ["CD", "CD R"]
+
+[pricing.grid_fallback_ore_ex_vat]
+# N1 C-kunde. Timer i dansk tid: 00-06, 06-17, 17-21, 21-24
+winter = [8.8, 26.4, 79.2, 26.4]   # oktober-marts
+summer = [8.8, 12.8, 34.4, 12.8]   # april-september
+
+[pricing.energinet_ore_ex_vat]
+# Systemtarif + nettarif. Opdateres én gang om året (Energinets tarifkatalog).
+"2026" = 11.5
+"2027" = 10.5
+
+[pricing.elafgift_ore_ex_vat]
+# Midlertidigt nedsat til EU-minimum 2026-2027. 2028 skal tjekkes, når satsen er kendt.
+"2026" = 0.8
+"2027" = 0.8
+"2028" = 72.7
+
+[charging]
+energy_kwh = 30          # typisk behov pr. opladning
+charger_kw = 11          # ladeboksens effekt
+efficiency = 0.9         # tab i lader og batteri
+
+[model]
+train_start = "2024-11-01"      # efter Nordic flow-based (30. okt. 2024)
+max_horizon_days = 7
+recency_half_life_days = 120
+quantiles = [0.1, 0.5, 0.9]
+backtest_weeks = 10
+bias_window_days = 21
+calibration_window_days = 30
+target_coverage = 0.8
+
+# Vejrpunkter: vind, solindstråling og temperatur hentes for hvert punkt.
+[[weather.points]]
+name = "dk1_land"
+lat = 56.2
+lon = 8.9
+[[weather.points]]
+name = "dk_nordsoe"
+lat = 55.6
+lon = 7.6
+[[weather.points]]
+name = "dk2"
+lat = 55.4
+lon = 11.8
+[[weather.points]]
+name = "de_nordvest"
+lat = 53.6
+lon = 8.5
+[[weather.points]]
+name = "de_nordoest"
+lat = 53.9
+lon = 12.5
+[[weather.points]]
+name = "de_syd"
+lat = 48.8
+lon = 10.5
+[[weather.points]]
+name = "se3"
+lat = 59.3
+lon = 15.5
+[[weather.points]]
+name = "no2"
+lat = 58.9
+lon = 6.5
