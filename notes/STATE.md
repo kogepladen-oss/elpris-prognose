@@ -10,6 +10,9 @@ Læs denne fil og `notes/LEARNINGS.md` i starten af hver session. Opdater dem, n
   Første hentning tog ca. 10 min pga. Energy-Charts' kaldgrænse.
 - Open-Meteo Previous Runs leverer 100 m-vind. Hvert 2.–3. kald holdes tilbage i ca. 2 min; alle punkter hentes derfor i ét kald.
 - N1-tariffer fra DatahubPricelist kan også ramme 429; så bruges den gemte prisliste eller reservetabellen.
+  N1 bruger koden `CD` også til abonnementet; kun ChargeType D03 med timeopløsning tæller (rettet 13. nov.).
+- Kendt svaghed (13. nov.): prognosen rammer aftentoppene for lavt, og båndet er bredt. 7 dage før slår den
+  kun lige den naive metode over 30 dage. Følg op, når der er 30 dages live-prognoser.
 
 ## Kendte forenklinger
 
