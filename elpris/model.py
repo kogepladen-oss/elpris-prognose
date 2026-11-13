@@ -12,7 +12,7 @@ from . import features as F
 
 log = logging.getLogger(__name__)
 
-MODEL_VERSION = "hgb-q-v2"  # v2: fra 5 dage før forudsiges afvigelsen fra sidste uges niveau
+MODEL_VERSION = "hgb-q-v2.1"  # v2: relativt niveau fra 5 dage før; v2.1: læring kun af egne fejl
 SCALE = 20.0  # øre/kWh i asinh-transformationen; tåler negative priser
 
 
@@ -88,6 +88,8 @@ def corrections(hist: pd.DataFrame, prices: pd.DataFrame, upto_date: pd.Timestam
     m = cfg["model"]
     if hist is None or hist.empty:
         return 0.0, 1.0
+    if "model_version" in hist:  # læring bruger kun den aktuelle models egne fejl
+        hist = hist[hist["model_version"] == MODEL_VERSION]
     d = hist[(hist["h"] == h) & (hist["target_date"] <= upto_date)
              & (hist["target_date"] > upto_date - pd.Timedelta(days=m["calibration_window_days"]))]
     if len(d) < 48:

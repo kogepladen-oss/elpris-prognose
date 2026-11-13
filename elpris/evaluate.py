@@ -9,12 +9,17 @@ import pandas as pd
 from .timeutil import local_date
 
 
-def resolved(fc: pd.DataFrame, prices: pd.DataFrame) -> pd.DataFrame:
-    """Én prognose pr. (issue-dag, måltime): live foretrækkes frem for backtest. Med faktisk pris."""
+def resolved(fc: pd.DataFrame, prices: pd.DataFrame, version: str | None = None) -> pd.DataFrame:
+    """Én prognose pr. (issue-dag, måltime). Med faktisk pris.
+
+    Rækkefølge: live før backtest, og den aktuelle modelversion før ældre versioner
+    (en live-prognose fra en ældre version slår stadig en backtest: den blev faktisk vist).
+    """
     if fc is None or fc.empty:
         return pd.DataFrame()
     d = fc.copy()
-    d["rank"] = (d["kind"] != "live").astype(int)
+    old = (d["model_version"] != version).astype(int) if version else 0
+    d["rank"] = (d["kind"] != "live").astype(int) * 2 + old
     d = d.sort_values(["issue_date", "target_utc", "rank", "issued_at"],
                       ascending=[True, True, True, False], na_position="last")
     d = d.drop_duplicates(["issue_date", "target_utc"], keep="first")

@@ -97,7 +97,7 @@ def main(argv=None) -> int:
             existing = store.append_forecasts(live)
 
     # 5. fejlregnskab og ugerapport
-    res = evaluate.resolved(existing, prices)
+    res = evaluate.resolved(existing, prices, model.MODEL_VERSION)
     m7 = evaluate.metrics(res, K, 7, cfg)
     m30 = evaluate.metrics(res, K, 30, cfg)
     if now.tz_convert("Europe/Copenhagen").dayofweek == 0 or not any(REPORTS.glob("*.md")):
