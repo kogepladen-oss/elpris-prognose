@@ -262,7 +262,7 @@ async function init() {
   }
   document.getElementById("title").textContent = D.title;
   document.getElementById("stamp").textContent =
-    `Opdateret ${fmtT.format(new Date(D.generated_at))} · priser kendt til og med ${D.anchor_date} · model ${D.model_version}`;
+    `Opdateret ${fmtT.format(new Date(D.generated_at))} · priser kendt til og med ${D.anchor_date ?? "–"} · model ${D.model_version}`;
   const warns = [...(D.warnings || [])];
   if (!D.live) warns.push("Der er ingen ny prognose i dag. Grafen viser kun kendte priser.");
   document.getElementById("warnings").innerHTML = warns.map(w => `<div class="warn">${w}</div>`).join("");

@@ -79,14 +79,19 @@ def main(argv=None) -> int:
         warnings.append("Dagens vejrprognose kunne ikke hentes; bruger seneste gemte." if snaps
                         else "Ingen vejrprognose tilgængelig; ingen ny prognose i dag.")
     wx_hist = F.wide_weather(wx_long, by_lead=True)
+    history_ready = wx_long.attrs.get("complete", True)
+    if not history_ready:
+        warnings.append("Første opsætning: historiske vejrprognoser hentes stadig. "
+                        "Prognosen kommer ved næste kørsel.")
 
     # 4. backtest af nye uger + ny live-prognose
     existing = store.read(store.FORECASTS)
-    bt = model.backtest(prices, wx_hist, existing, cfg, K)
-    if not bt.empty:
-        existing = store.append_forecasts(bt)
     live = pd.DataFrame()
-    if snap is not None:
+    if history_ready:
+        bt = model.backtest(prices, wx_hist, existing, cfg, K)
+        if not bt.empty:
+            existing = store.append_forecasts(bt)
+    if history_ready and snap is not None:
         live = model.live_forecast(prices, wx_hist, F.wide_weather(snap, by_lead=False), existing, cfg, now)
         if not live.empty:
             existing = store.append_forecasts(live)
@@ -103,7 +108,9 @@ def main(argv=None) -> int:
     comp_idx = pd.date_range((now - pd.Timedelta(days=8)).floor("h"), (now + pd.Timedelta(days=8)).ceil("h"), freq="h")
     comp, tw = tariffs.components(comp_idx, cfg, pl)
     warnings += tw
-    meta.update({"anchor_date": str(K.date()), "issue_date": str(now.tz_convert("Europe/Copenhagen").date()),
+    if not history_ready:  # så den næste planlagte kørsel i dag fortsætter
+        meta.pop("anchor_date", None)
+    meta.update({"anchor_date": str(K.date()) if history_ready else None, "issue_date": str(now.tz_convert("Europe/Copenhagen").date()),
                  "model_version": model.MODEL_VERSION, "generated_at": now.isoformat()})
     site.write(site.build_json(now, prices, comp, live, res, m7, m30, warnings, cfg, meta))
     store.META.write_text(json.dumps(meta, indent=2))

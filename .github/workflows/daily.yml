@@ -24,7 +24,7 @@ concurrency:
 jobs:
   forecast:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 100
     steps:
       - uses: actions/checkout@v4
 
@@ -40,9 +40,12 @@ jobs:
         run: python -m pytest -q tests
 
       - name: Kør prognose
+        timeout-minutes: 85
         run: python -m elpris.run_daily ${{ inputs.force && '--force' || '' }}
 
+      # Gem også, når kørslen fejler eller løber tør for tid, så hentede data ikke går tabt.
       - name: Gem resultat
+        if: always()
         run: |
           git config user.name "elpris-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

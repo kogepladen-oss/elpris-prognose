@@ -31,7 +31,9 @@ def http_get(url: str, params: dict, tries: int = 6, timeout: int = 90,
     last = None
     for i in range(tries):
         try:
+            t0 = time.monotonic()
             r = requests.get(url, params=params, headers=UA, timeout=timeout)
+            log.debug("%s %s på %.1f s", r.status_code, url, time.monotonic() - t0)
             if r.status_code == 200:
                 return r
             if 400 <= r.status_code < 500 and r.status_code != 429:
@@ -49,6 +51,7 @@ def http_get(url: str, params: dict, tries: int = 6, timeout: int = 90,
                 continue
         except requests.RequestException as e:  # netværksfejl: prøv igen
             last = str(e)
+            log.warning("Netværksfejl mod %s (forsøg %d): %s", url, i + 1, str(e)[:200])
         time.sleep(2 ** i * 3)
     raise SourceError(f"{url} fejlede efter {tries} forsøg: {last}")
 
@@ -184,7 +187,7 @@ def fetch_weather_previous_runs(points: list[Point], start: date, end: date) -> 
     out = []
     cur = start
     while cur <= end:
-        nxt = min(cur + timedelta(days=90), end)
+        nxt = min(cur + timedelta(days=30), end)
         for p in points:  # ét punkt pr. kald holder svarene små
             for attempt_var in (wind_src, "wind_speed_10m"):
                 vars_ = [attempt_var, "shortwave_radiation", "temperature_2m"]
@@ -193,8 +196,10 @@ def fetch_weather_previous_runs(points: list[Point], start: date, end: date) -> 
                           "start_date": cur.isoformat(), "end_date": nxt.isoformat(),
                           "timezone": "GMT", "wind_speed_unit": "ms"}
                 try:
-                    js = http_get(OM_PREVIOUS, params).json()
-                    time.sleep(2.5)  # hold os under Open-Meteos gratisgrænse pr. minut
+                    t0 = time.monotonic()
+                    js = http_get(OM_PREVIOUS, params, timeout=60, tries=4).json()
+                    log.info("Open-Meteo %s %s-%s: %.1f s", p.name, cur, nxt, time.monotonic() - t0)
+                    time.sleep(1.5)  # hold os under Open-Meteos gratisgrænse pr. minut
                     break
                 except SourceError as e:
                     if attempt_var == "wind_speed_10m":

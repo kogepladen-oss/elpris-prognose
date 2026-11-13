@@ -52,7 +52,12 @@ def _write_weather_months(df: pd.DataFrame, months: set[str]) -> None:
             part.to_parquet(WEATHER_HIST / f"{m}.parquet", compression="zstd")
 
 
-def update_weather_history(points, train_start: pd.Timestamp, now: pd.Timestamp) -> pd.DataFrame:
+def update_weather_history(points, train_start: pd.Timestamp, now: pd.Timestamp,
+                           budget_s: float = 35 * 60) -> pd.DataFrame:
+    """Opdaterer historiske vejrprognoser. Første gang tager det lang tid; stopper efter budget_s
+    sekunder og fortsætter ved næste kørsel (df.attrs["complete"] er så False)."""
+    import time as _time
+    t0 = _time.monotonic()
     old = read_weather_history()
     names = {p.name for p in points}
     if old is not None and set(old["point"].unique()) != names:
@@ -61,16 +66,29 @@ def update_weather_history(points, train_start: pd.Timestamp, now: pd.Timestamp)
     start = (train_start - pd.Timedelta(days=8)).date() if old is None else \
         (old["time_utc"].max() - pd.Timedelta(days=9)).date()
     end = (now + pd.Timedelta(days=7)).date()  # Previous Runs dækker også fremtiden for korte leads
-    new, wind_src = sources.fetch_weather_previous_runs(points, start, end)
-    if new.empty:
-        return old
-    df = new if old is None else pd.concat([old, new])
-    df = df.drop_duplicates(["time_utc", "point", "lead"], keep="last").sort_values(["time_utc", "point", "lead"])
-    df = df.reset_index(drop=True)
-    for c in ("wind_speed_100m", "shortwave_radiation", "temperature_2m"):
-        df[c] = df[c].astype("float32")
-    _write_weather_months(df, set(new["time_utc"].dt.strftime("%Y-%m")))
-    df.attrs["wind_src"] = wind_src
+    df, wind_src = old, "wind_speed_100m"
+    complete = True
+    cur = start
+    # Hent i bidder på 90 dage og gem efter hver bid, så en afbrudt kørsel kan fortsætte næste gang.
+    while cur <= end:
+        nxt = min(cur + timedelta(days=89), end)
+        log.info("Henter historiske vejrprognoser %s til %s", cur, nxt)
+        new, wind_src = sources.fetch_weather_previous_runs(points, cur, nxt)
+        if not new.empty:
+            df = new if df is None else pd.concat([df, new])
+            df = df.drop_duplicates(["time_utc", "point", "lead"], keep="last")
+            df = df.sort_values(["time_utc", "point", "lead"]).reset_index(drop=True)
+            for c in ("wind_speed_100m", "shortwave_radiation", "temperature_2m"):
+                df[c] = df[c].astype("float32")
+            _write_weather_months(df, set(new["time_utc"].dt.strftime("%Y-%m")))
+        cur = nxt + timedelta(days=1)
+        if cur <= end and _time.monotonic() - t0 > budget_s:
+            log.warning("Tidsbudget brugt; vejrhistorikken hentes færdig i næste kørsel (nået til %s).", cur)
+            complete = False
+            break
+    if df is not None:
+        df.attrs["wind_src"] = wind_src
+        df.attrs["complete"] = complete
     return df
 
 
