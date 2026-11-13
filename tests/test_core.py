@@ -102,3 +102,28 @@ def test_forecasts_never_overwritten(tmp_path, monkeypatch):
     changed = base.assign(p50=99.0)
     out = store.append_forecasts(changed)
     assert len(out) == 1 and out["p50"].iloc[0] == 50.0
+
+
+def test_price_fallback_to_energy_charts(monkeypatch):
+    from elpris import sources
+
+    class R:
+        def __init__(self, js):
+            self._js = js
+
+        def json(self):
+            return self._js
+
+    def fake_get(url, params, **kw):
+        if "energidataservice" in url:
+            raise sources.SourceError("429")
+        t0 = int(pd.Timestamp(params["start"], tz="Europe/Copenhagen").timestamp())
+        return R({"unix_seconds": [t0 + 900 * i for i in range(8)], "price": [100.0] * 4 + [200.0] * 4})
+
+    monkeypatch.setattr(sources, "http_get", fake_get)
+    monkeypatch.setattr(sources.time, "sleep", lambda s: None)
+    df = sources.fetch_prices(pd.Timestamp("2026-11-12", tz="UTC"), pd.Timestamp("2026-11-12T02:00", tz="UTC"))
+    assert set(df.columns) == set(sources.AREAS)
+    # 4 kvarterer à 200 EUR/MWh i timen 00 UTC -> 200 * 7,46 / 10 øre/kWh
+    v = df.loc[pd.Timestamp("2026-11-11T00:00", tz="UTC"), "DK1"]
+    assert abs(v - 200 * sources.EUR_DKK / 10) < 1e-6

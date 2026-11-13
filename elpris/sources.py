@@ -26,7 +26,8 @@ class SourceError(RuntimeError):
     pass
 
 
-def http_get(url: str, params: dict, tries: int = 6, timeout: int = 90) -> requests.Response:
+def http_get(url: str, params: dict, tries: int = 6, timeout: int = 90,
+             max_wait: float = 300) -> requests.Response:
     last = None
     for i in range(tries):
         try:
@@ -39,6 +40,8 @@ def http_get(url: str, params: dict, tries: int = 6, timeout: int = 90) -> reque
             if r.status_code == 429:  # grænse for antal kald ramt: vent det, serveren beder om
                 ra = r.headers.get("Retry-After")
                 wait = float(ra) if ra and ra.replace(".", "").isdigit() else 30 * (i + 1)
+                if wait > max_wait:
+                    raise SourceError(f"{url} gav 429, ventetid {wait:.0f} s: {r.text[:200]}")
                 wait = min(max(wait, 5), 300)
                 log.warning("429 fra %s (Retry-After=%s, body=%s). Venter %.0f s.",
                             url, ra, r.text[:200].replace("\n", " "), wait)
@@ -59,12 +62,53 @@ def _eds_records(dataset: str, start: datetime, end: datetime, flt: dict) -> lis
         "filter": json.dumps(flt),
         "limit": 0,
     }
-    recs = http_get(f"{EDS}/{dataset}", params).json().get("records", [])
+    recs = http_get(f"{EDS}/{dataset}", params, max_wait=30).json().get("records", [])
     time.sleep(2)  # skån Energi Data Service ved første store hentning
     return recs
 
 
+ENERGY_CHARTS = "https://api.energy-charts.info/price"
+EC_ZONES = {"DK1": "DK1", "DK2": "DK2", "DE": "DE-LU", "NO2": "NO2", "SE3": "SE3", "SE4": "SE4"}
+
+
 def fetch_prices(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+    """Spotpriser fra Energi Data Service; ved fejl eller kaldgrænse fra Energy-Charts (Fraunhofer ISE).
+
+    Energi Data Service begrænser kald pr. IP, og GitHub Actions deler IP-adresser med mange andre,
+    så reserven bruges ofte dér. Begge kilder leverer de samme Nord Pool-priser.
+    """
+    try:
+        return fetch_prices_eds(start, end)
+    except SourceError as e:
+        log.warning("Energi Data Service fejlede (%s). Henter priser fra Energy-Charts.", str(e)[:200])
+        return fetch_prices_energy_charts(start, end)
+
+
+def fetch_prices_energy_charts(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+    rows = []
+    d0 = (start - pd.Timedelta(days=1)).tz_convert("Europe/Copenhagen").date()
+    d_end = (end + pd.Timedelta(days=1)).tz_convert("Europe/Copenhagen").date()
+    for area, bzn in EC_ZONES.items():
+        cur = d0
+        while cur <= d_end:
+            nxt = min(cur + timedelta(days=89), d_end)
+            js = http_get(ENERGY_CHARTS, {"bzn": bzn, "start": cur.isoformat(), "end": nxt.isoformat()},
+                          max_wait=120).json()
+            time.sleep(1)
+            for ts, p in zip(js.get("unix_seconds") or [], js.get("price") or []):
+                if p is not None:
+                    rows.append((ts, area, p * EUR_DKK))
+            cur = nxt + timedelta(days=1)
+    if not rows:
+        raise SourceError("Energy-Charts gav ingen priser")
+    df = pd.DataFrame(rows, columns=["ts", "area", "dkk_mwh"])
+    df["t"] = pd.to_datetime(df["ts"], unit="s", utc=True).dt.floor("h")
+    df = df.groupby(["t", "area"])["dkk_mwh"].mean().unstack("area").reindex(columns=AREAS) / 10.0
+    df.index.name = "time_utc"
+    return df.loc[df.index >= start - pd.Timedelta(days=1)].sort_index()
+
+
+def fetch_prices_eds(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
     """Timepriser for AREAS i øre/kWh uden moms. 15-min priser midles til timer."""
     rows = []
     # EDS filtrerer start/end i dansk tid: hent en dag ekstra i begge ender og fjern dubletter.
@@ -100,7 +144,7 @@ def fetch_prices(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
 
 def fetch_grid_tariffs(gln: str, codes: list[str]) -> pd.DataFrame:
     params = {"filter": json.dumps({"GLN_Number": [gln], "ChargeTypeCode": codes}), "limit": 0}
-    recs = http_get(f"{EDS}/DatahubPricelist", params).json().get("records", [])
+    recs = http_get(f"{EDS}/DatahubPricelist", params, max_wait=60).json().get("records", [])
     if not recs:
         raise SourceError("DatahubPricelist gav ingen tariffer for netselskabet")
     df = pd.DataFrame(recs)
