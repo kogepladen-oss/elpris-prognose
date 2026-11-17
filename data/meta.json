@@ -1,7 +1,7 @@
 {
   "wind_source": "wind_speed_100m",
-  "anchor_date": "2026-11-17",
+  "anchor_date": "2026-11-18",
   "issue_date": "2026-11-17",
   "model_version": "hgb-q-v2.1",
-  "generated_at": "2026-11-16T23:00:11.398117+00:00"
+  "generated_at": "2026-11-17T21:11:22.237370+00:00"
 }
